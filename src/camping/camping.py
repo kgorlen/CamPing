@@ -1,11 +1,12 @@
 """
-camping.py -- Ping security cameras and healthecks.io
+camping.py -- Check Blue Iris security camera status and ping healthchecks.io with results
 
 Created on February 11, 2025
 
 References:
-    https://stackoverflow.com/questions/2953462/pinging-servers-in-python
-    https://pypi.org/project/tcppinglib/
+    https://blueirissoftware.com/
+    https://nwesterhausen.github.io/pyblueiris/index.html
+    https://healthchecks.io/about/
     https://toml.io/en/ -- TOML: A config file format for humans
 
 
@@ -19,7 +20,9 @@ from pathlib import Path
 import logging
 from logging.handlers import RotatingFileHandler
 import tomllib
+import asyncio
 from typing import Any, NoReturn
+from urllib.parse import urlparse, ParseResult
 
 
 SCRIPT_DIR: Path = Path(__file__).absolute().parent
@@ -30,8 +33,10 @@ sys.path.append(str(SCRIPT_DIR))
 # pylint: disable=wrong-import-position
 from __init__ import __version__  # pylint: disable=no-name-in-module
 from platformdirs import user_config_dir, user_log_dir
+import keyring
 import requests  # type: ignore
-from tcppinglib import multi_tcpping
+from pyblueiris import BlueIris
+from aiohttp import ClientSession
 
 # pylint: enable=wrong-import-position
 
@@ -70,7 +75,8 @@ rotating_handler.setFormatter(
 )
 logging.getLogger().addHandler(rotating_handler)
 
-healthchecks_url = ""
+healthchecks_url: str = ""
+"""healthchecks.io URL"""
 
 
 def exit_with_status(status: int) -> NoReturn:
@@ -84,14 +90,26 @@ def exit_with_status(status: int) -> NoReturn:
     sys.exit(status)
 
 
-def main() -> None:
-    """Ping security cameras and healthecks.io.
+def signal_failure(msg: str) -> NoReturn:
+    """Signal failure and exit.
+
+    Args:
+        msg (str): message to log
+    """
+    logger.info(f'Sending fail ping: "{msg}" ...')
+    response = requests.post(healthchecks_url + "/fail", timeout=20, data=msg)
+    response.raise_for_status()  # Raise an exception for bad status codes (4xx, 5xx)
+    exit_with_status(1)
+
+
+async def main() -> None:
+    """Check Blue Iris security camera status.
 
     Raises:
         FileNotFoundError: Configuration file not found
         ValueError: Error reading configuration file.
-        KeyError: healthchecks_url or [cameras] not found in configuration .toml file.
-        ConnectionError: Dead camera(s) detected.
+        KeyError: Key not found in configuration .toml file.
+        ValueError: BlueIris password not found in keyring.
     """
     global healthchecks_url  # pylint: disable=global-statement
 
@@ -120,45 +138,83 @@ def main() -> None:
 
     logger.info(f'Configuration loaded from "{config_file}".')
 
-    if "healthchecks_url" not in config_data:
-        raise KeyError(f'"healthchecks_url" not found in {config_file}')
+    for key in ["blueiris_user", "blueiris_url", "healthchecks_url"]:
+        if key not in config_data:
+            raise KeyError(f'"{key}" not found in {config_file}')
 
     healthchecks_url = config_data["healthchecks_url"]
 
-    if "cameras" not in config_data:
-        raise KeyError(f'"[cameras]" not found in {config_file}')
+    blueiris_password = keyring.get_password("blueiris", config_data["blueiris_user"])
+    if not blueiris_password:
+        raise ValueError("BlueIris password not found in keyring.")
 
-    down: list[str] = []
+    logger.info(f"Parsing BlueIris URL {config_data["blueiris_url"]} ...")
+    parsed_url: ParseResult = urlparse(config_data["blueiris_url"])
+    protocol: str = parsed_url.scheme
+    host: str | None = parsed_url.hostname
+    port: int = parsed_url.port or (443 if protocol == "https" else 80)
 
-    logger.info("Pinging cameras ...")
-    cams = multi_tcpping(
-        [val[0] for val in config_data["cameras"].values()], port=80, timeout=1, count=3, interval=1
-    )
+    logger.info("Checking cameras ...")
+    async with ClientSession(raise_for_status=True) as session:  # Create an aiohttp session
+        bi = BlueIris(
+            aiosession=session,
+            user=config_data["blueiris_user"],
+            password=blueiris_password,
+            protocol=protocol,
+            host=host,
+            port=port,
+            logger=logger,
+            # debug=True
+        )
 
-    for cam, (camera, (ip, model, name)) in zip(cams, config_data["cameras"].items()):
-        if cam.is_alive:
-            logger.info(f"{camera} is UP:\t{ip}\t{model}\t{name}.")
-        else:
-            down.append(camera)
-            logger.info(f"{camera} is DOWN:\t{ip}\t{model}\t{name}.")
+        logger.info(
+            f"Logging into {protocol}://{host}:{port} as {config_data["blueiris_user"]} ..."
+        )
 
-    if down:
-        msg = f'Camera(s) DOWN: {", ".join(down)}.'
-        logger.info(f'Sending fail ping: "{msg}" ...')
-        response = requests.post(healthchecks_url + "/fail", timeout=20, data=msg)
+        try:
+            if not await bi.setup_session():
+                signal_failure("Blue Iris DOWN.")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            signal_failure(f"Blue Iris DOWN: {type(e).__name__}: {e}.")
+
+        if bi.version == "noname":
+            signal_failure("Blue Iris login failed.")
+
+        logger.info(f"Blue Iris Version {bi.version} {bi.name}.")
+
+        logger.info("Updating camera list ...")
+        logger.setLevel(logging.WARNING)
+        await bi.update_camlist()
+        logger.setLevel(logging.INFO)
+
+        down: list[str] = []
+
+        for camera in bi.cameras:
+            if camera.short_name == "@Index":
+                continue
+
+            await camera.update_camconfig()
+            camera_name = f"{camera.display_name} ({camera.short_name})"
+            if camera.is_enabled and camera.is_online and not camera.is_nosignal:
+                logger.info(f"{camera_name} is UP.")
+            else:
+                down.append(camera_name)
+                logger.info(f"{camera_name} is DOWN.")
+
+        if down:
+            signal_failure(f'Camera(s) DOWN: {", ".join(sorted(down))}.')
+
+        logger.info("Pinging healthchecks.io ...")
+        response = requests.get(healthchecks_url, timeout=20)
         response.raise_for_status()  # Raise an exception for bad status codes (4xx, 5xx)
-        exit_with_status(1)
-
-    logger.info("Pinging healthchecks.io ...")
-    response = requests.get(healthchecks_url, timeout=20)
-    response.raise_for_status()  # Raise an exception for bad status codes (4xx, 5xx)
-    logger.info("Successful ping sent.")
-    exit_with_status(0)
+        logger.info("Successful ping sent.")
+        exit_with_status(0)
 
 
-if __name__ == "__main__":
+def cli() -> None:
+    """Command line interface for CamPing."""
     try:
-        main()
+        asyncio.run(main())
     except Exception as msg:  # pylint: disable=broad-exception-caught
         """Log a CRITICAL message and sys.exit(1)."""
         print(
@@ -168,3 +224,7 @@ if __name__ == "__main__":
         requests.post(healthchecks_url + "/fail", timeout=20, data=str(msg))
         logger.critical(f"{msg}; exiting.")
         exit_with_status(1)
+
+
+if __name__ == "__main__":
+    cli()
