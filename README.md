@@ -10,7 +10,7 @@ no-inline-html MD033
 
 # CamPing
 
-**camping** - Ping security cameras.
+**camping** - Check Blue Iris security camera status and ping healthchecks.io with results.
 
 # SYNOPSIS
 
@@ -18,10 +18,11 @@ no-inline-html MD033
 
 # DESCRIPTION
 
-The **camping** CLI pings the cameras listed in the **camping.toml** configuration file
-and pings healthchecks.io at the URL also specified in the configuration file.
-If all cameras respond, **camping** sends a success ping; if not, **camping**
-sends a /fail ping with a list of the failed cameras.
+The **camping** CLI logs into the Blue Iris server using the URL and user name
+in the  **camping.toml** configuration file, obtains a list of cameras and their
+status, and pings healthchecks.io at the URL also specified in the configuration
+file. If all cameras are UP, **camping** sends a success ping; if not,
+**camping** sends a /fail ping with a list of the failed cameras.
 
 **camping** also writes a log file named **camping.log** to the conventional
 OS-dependent log directory, `C:\Users\`*`Username`*`\AppData\Local\CamPing\Logs`
@@ -40,41 +41,40 @@ conventional OS-dependent data directory,
 See [TOML: A config file format for humans](https://toml.io/en/) for the
 **.toml** file format specification.
 
+## blueiris_url
+
+The `blueiris_url` can be found in Blue Iris *Settings -> Web server*.
+
+<pre>
+blueiris_url = "http://<i>IP address</i>:<i>port</i>"
+</pre>
+
+## blueiris_user
+
+The list of valid users can be found in Blue Iris *Settings -> Users*.
+
+```
+blueiris_user = "LiveView"
+```
+
+The `blueiris_user` setting is used to retrieve the Blue Iris user's password
+from the PC's keyring.  Set the Blue Iris password with the command:
+<pre>
+keyring set "blueiris" "<i>blueiris_user</i>"
+</pre>
+For example:
+
+```
+keyring set "blueiris" "LiveView"
+```
+
 ## healthchecks_url
+
+See: [Healthchecks.io](https://healthchecks.io/about/) for details.
 
 ```
 # healthchecks.io Ping URL
-healthchecks_url = "https://hc-ping.com/**********************/security-cameras"
-```
-
-## [cameras]
-
-```
-[cameras]
-
-#Cam#        IP         Model         Name
-Cam1  = ["10.0.0.8",  "Amcrest",   "Lobby"]
-Cam2  = ["10.0.0.9",  "Amcrest",   "S Corridor East"]
-Cam3  = ["10.0.0.11", "Amcrest",   "Garage SW"]
-Cam4  = ["10.0.0.17", "Amcrest",   "Garage North"]
-Cam5  = ["10.0.0.18", "Amcrest",   "Garage East"]
-Cam6  = ["10.0.0.15", "Amcrest",   "Garage SE"]
-Cam7  = ["10.0.0.25", "Amcrest",   "N Corridor West"]
-Cam8  = ["10.0.0.12", "Amcrest",   "Garage NW"]
-Cam9  = ["10.0.0.16", "Amcrest",   "Roof West"]
-Cam10 = ["10.0.0.19", "Amcrest",   "Lobby Door"]
-Cam11 = ["10.0.0.10", "Amcrest",   "Commercial"]
-Cam12 = ["10.0.0.71", "HIKVision", "Columbus"]
-Cam13 = ["10.0.0.70", "HIKVision", "Powell Entrance"]
-Cam14 = ["10.0.0.72", "HIKVision", "Powell South"]
-Cam15 = ["10.0.0.73", "HIKVision", "Columbus Entrance"]
-Cam16 = ["10.0.0.13", "Amcrest",   "Garage Gate"]
-Cam17 = ["10.0.0.24", "Amcrest",   "Roof East"]
-Cam18 = ["10.0.0.14", "Amcrest",   "Mail Room"]
-Cam19 = ["10.0.0.22", "Amcrest",   "S Corridor West"]
-Cam20 = ["10.0.0.20", "Amcrest",   "Garage Elevator"]
-Cam21 = ["10.0.0.21", "Amcrest",   "Bike Room"]
-Cam22 = ["10.0.0.23", "Amcrest",   "Server Room"]
+healthchecks_url = "<https://hc-ping.com/**********************/security-cameras>"
 ```
 
 # INSTALLATION
@@ -89,6 +89,12 @@ Install [pipx](https://pipx.pypa.io/stable/):
 pip install pipx
 ```
 
+Install [keyring](https://pypi.org/project/keyring/):
+
+```
+pipx install keyring
+```
+
 ## INSTALL **camping** FROM `.whl` package
 
 <pre>
@@ -98,7 +104,7 @@ pip install pipx
 For example:
 
 <pre>
-<code>pipx install <i>path</i>\camping-0.1.5-py3-none-any.whl</code>
+<code>pipx install <i>path</i>\camping-2.0.0-py3-none-any.whl</code>
 </pre>
 
 ## INSTALL **camping** FROM `.tar.gz` package
@@ -112,12 +118,14 @@ Alternatively, install **camping** from a `.tar.gz` package file:
 For example:
 
 <pre>
-<code>pipx install <i>path</i>\camping-0.1.5-.tar.gz</code>
+<code>pipx install <i>path</i>\camping-2.0.0-.tar.gz</code>
 </pre>
 
 # SEE ALSO
 
-* [tcppinglib: Easy Way to Measure Connectivity and Latency](https://pypi.org/project/tcppinglib/)<br>
+* [Blue Iris](https://blueirissoftware.com/)<br>
+* [pyblueiris Documentation](https://nwesterhausen.github.io/pyblueiris/index.html)<br>
+* [Healthchecks.io](https://healthchecks.io/about/)<br>
 * [TOML: A config file format for humans](https://toml.io/en/)<br>
 
 # AUTHOR
