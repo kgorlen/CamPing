@@ -68,13 +68,27 @@ For example:
 keyring set "blueiris" "LiveView"
 ```
 
-## healthchecks_url
+## blueiris_ping_url
 
-See: [Healthchecks.io](https://healthchecks.io/about/) for details.
+See [Healthchecks.io](https://healthchecks.io/about/) for details.  The
+`blueiris_ping_url` is pinged with the status of the Blue Iris application: OK
+if the status of all cameras is successfully retrieved, or failure is signalled
+with an error message.
 
 ```
-# healthchecks.io Ping URL
-healthchecks_url = "<https://hc-ping.com/**********************/security-cameras>"
+# Blue Iris status healthchecks.io URL
+blueiris_ping_url = "https://hc-ping.com/**********************/blue-iris*"
+```
+
+## cameras_ping_url
+
+The `cameras_ping_url` is pinged with the status of the cameras connected to
+Blue Iris: OK if all cameras are **UP**, or failure is signalled with a list of
+cameras that are **DOWN**.
+
+```
+# Camera status healthchecks.io URL
+cameras_ping_url = "https://hc-ping.com/**********************/security-cameras"
 ```
 
 # INSTALLATION

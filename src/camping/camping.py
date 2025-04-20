@@ -75,7 +75,7 @@ rotating_handler.setFormatter(
 )
 logging.getLogger().addHandler(rotating_handler)
 
-healthchecks_url: str = ""
+blueiris_ping_url: str = ""
 """healthchecks.io URL"""
 
 
@@ -90,16 +90,30 @@ def exit_with_status(status: int) -> NoReturn:
     sys.exit(status)
 
 
-def signal_failure(msg: str) -> NoReturn:
+def ping(url: str) -> None:
+    """Ping healthchecks.io.
+
+    Args:
+        url (str): healthchecks.io URL
+    """
+    logger.info(f'Sending ping to {url} ...')
+    response = requests.post(url, timeout=20)
+    response.raise_for_status()  # Raise an exception for bad status codes (4xx, 5xx)
+
+
+def signal_failure(url: str, msg: str) -> NoReturn:
     """Signal failure and exit.
 
     Args:
+        url (str): healthchecks.io URL
         msg (str): message to log
     """
-    logger.info(f'Sending fail ping: "{msg}" ...')
-    response = requests.post(healthchecks_url + "/fail", timeout=20, data=msg)
-    response.raise_for_status()  # Raise an exception for bad status codes (4xx, 5xx)
-    exit_with_status(1)
+    logger.info(f'Sending fail ping to {url}: "{msg}" ...')
+    try:
+        requests.post(url + "/fail", timeout=20, data=msg)
+    finally:
+        logger.critical(f"{msg}; exiting.")
+        exit_with_status(1)
 
 
 async def main() -> None:
@@ -111,7 +125,7 @@ async def main() -> None:
         KeyError: Key not found in configuration .toml file.
         ValueError: BlueIris password not found in keyring.
     """
-    global healthchecks_url  # pylint: disable=global-statement
+    global blueiris_ping_url  # pylint: disable=global-statement
 
     logger.info(f'{"=" * 60}')
     logger.info(f"{SCRIPT_NAME} version {__version__} starting ...")
@@ -138,11 +152,14 @@ async def main() -> None:
 
     logger.info(f'Configuration loaded from "{config_file}".')
 
-    for key in ["blueiris_user", "blueiris_url", "healthchecks_url"]:
+    for key in ["blueiris_user", "blueiris_url", "blueiris_ping_url", "cameras_ping_url"]:
         if key not in config_data:
             raise KeyError(f'"{key}" not found in {config_file}')
 
-    healthchecks_url = config_data["healthchecks_url"]
+    blueiris_ping_url = config_data["blueiris_ping_url"]
+    """healthchecks.io URL for Blue Iris."""
+    cameras_ping_url = config_data["cameras_ping_url"]
+    """healthchecks.io URL for cameras."""
 
     blueiris_password = keyring.get_password("blueiris", config_data["blueiris_user"])
     if not blueiris_password:
@@ -173,12 +190,12 @@ async def main() -> None:
 
         try:
             if not await bi.setup_session():
-                signal_failure("Blue Iris DOWN.")
+                signal_failure(blueiris_ping_url, "Blue Iris DOWN.")
         except Exception as e:  # pylint: disable=broad-exception-caught
-            signal_failure(f"Blue Iris DOWN: {type(e).__name__}: {e}.")
+            signal_failure(blueiris_ping_url, f"Blue Iris DOWN: {type(e).__name__}: {e}.")
 
         if bi.version == "noname":
-            signal_failure("Blue Iris login failed.")
+            signal_failure(blueiris_ping_url, "Blue Iris login failed.")
 
         logger.info(f"Blue Iris Version {bi.version} {bi.name}.")
 
@@ -201,13 +218,14 @@ async def main() -> None:
                 down.append(camera_name)
                 logger.info(f"{camera_name} is DOWN.")
 
-        if down:
-            signal_failure(f'Camera(s) DOWN: {", ".join(sorted(down))}.')
+        # Blue Iris responded OK
+        ping(blueiris_ping_url)
 
-        logger.info("Pinging healthchecks.io ...")
-        response = requests.get(healthchecks_url, timeout=20)
-        response.raise_for_status()  # Raise an exception for bad status codes (4xx, 5xx)
-        logger.info("Successful ping sent.")
+        if down:
+            signal_failure(cameras_ping_url, f'Camera(s) DOWN: {", ".join(sorted(down))}.')
+
+        # All cameras are UP
+        ping(cameras_ping_url)
         exit_with_status(0)
 
 
@@ -221,9 +239,7 @@ def cli() -> None:
             f"{datetime.now().strftime(DATE_FMT)} - CRITICAL - {msg}; exiting.",
             file=sys.stderr,
         )
-        requests.post(healthchecks_url + "/fail", timeout=20, data=str(msg))
-        logger.critical(f"{msg}; exiting.")
-        exit_with_status(1)
+        signal_failure(blueiris_ping_url, str(msg))
 
 
 if __name__ == "__main__":
