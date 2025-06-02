@@ -90,15 +90,26 @@ def exit_with_status(status: int) -> NoReturn:
     sys.exit(status)
 
 
-def ping(url: str) -> None:
+def ping(url: str, msg: str="") -> None:
     """Ping healthchecks.io.
 
     Args:
         url (str): healthchecks.io URL
+        msg (str): message to log (default: "")
+
+    Raises:
+        requests.RequestException: If the request fails or returns a bad status code.
     """
-    logger.info(f'Sending ping to {url} ...')
-    response = requests.post(url, timeout=20)
-    response.raise_for_status()  # Raise an exception for bad status codes (4xx, 5xx)
+    # url = "https://httpstat.us/504?sleep=60000" # For testing, simulates a 504 Gateway Timeout
+    logger.info(f'Sending ping to {url} data="{msg}" ...')
+    for timeout in (5, 10, 15):
+        try:
+            response = requests.post(url, timeout=timeout, data=msg)
+            response.raise_for_status()  # Raise an exception for bad status codes (4xx, 5xx)
+            return
+        except requests.exceptions.Timeout:
+            logger.info(
+                f"Ping to {url} timed out after {timeout}s, retrying ...")
 
 
 def signal_failure(url: str, msg: str) -> NoReturn:
@@ -108,12 +119,9 @@ def signal_failure(url: str, msg: str) -> NoReturn:
         url (str): healthchecks.io URL
         msg (str): message to log
     """
-    logger.info(f'Sending fail ping to {url}: "{msg}" ...')
-    try:
-        requests.post(url + "/fail", timeout=20, data=msg)
-    finally:
-        logger.critical(f"{msg}; exiting.")
-        exit_with_status(1)
+    ping(url + "/fail", msg)
+    logger.critical(f"{msg}; exiting.")
+    exit_with_status(1)
 
 
 async def main() -> None:
