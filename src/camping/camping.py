@@ -263,7 +263,13 @@ def cli() -> None:
     try:
         asyncio.run(main())
     except Exception as msg:  # pylint: disable=broad-exception-caught
-        signal_failure(blueiris_ping_url, str(msg))
+        """Log a CRITICAL message and sys.exit(1)."""
+        print(
+            f"{datetime.now().strftime(DATE_FMT)} - CRITICAL - {msg}; exiting.",
+            file=sys.stderr,
+        )
+        logger.critical(f"{msg}; exiting.")
+        exit_with_status(1)
 
 
 if __name__ == "__main__":
