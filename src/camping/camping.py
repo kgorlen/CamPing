@@ -14,31 +14,34 @@ References:
 
 __author__ = "Keith Gorlen"
 
-import sys
+import asyncio
+import logging
 import os
 import subprocess
+import sys
 from datetime import datetime
-from pathlib import Path
-import logging
 from logging.handlers import RotatingFileHandler
-import tomllib
-import asyncio
+from pathlib import Path
 from typing import Any, NoReturn
-from urllib.parse import urlparse, ParseResult
+from urllib.parse import ParseResult, urlparse
 
+import tomllib
 
 SCRIPT_DIR: Path = Path(__file__).absolute().parent
 """Path to directory containing this Python script."""
 sys.path.append(str(SCRIPT_DIR))
 """Allow camping CLI to import modules from script directory."""
 
+# ruff: disable[E402]  # Disables module-import-not-at-top-of-file warnings
 # pylint: disable=wrong-import-position
-from __init__ import __version__  # pylint: disable=no-name-in-module
-from platformdirs import user_config_dir, user_log_dir
-import keyring
-from pyblueiris import BlueIris
-from aiohttp import ClientSession
 
+import keyring
+from __init__ import __version__  # pylint: disable=no-name-in-module
+from aiohttp import ClientSession
+from platformdirs import user_config_dir, user_log_dir
+from pyblueiris import BlueIris
+
+# pylint: enable=wrong-import-position
 # pylint: enable=wrong-import-position
 
 
@@ -114,7 +117,7 @@ def ping_healthchecks(url: str, data: str = "", timeout=10) -> None:
     # cmd.append("http://this-hostname-should-not-exist.invalid")  # Test DNS failure
     # cmd.append("https://10.255.255.1") # For testing, simulates a 504 Gateway Timeout
     cmd.append(url)
-    logger.info(f"Pinging healthchecks.io with command: {' '.join(cmd)}")
+    logger.info(f"Pinging healthchecks.io with command: {' '.join(cmd)} ...")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
