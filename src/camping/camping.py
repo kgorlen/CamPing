@@ -25,23 +25,20 @@ from pathlib import Path
 from typing import Any, NoReturn
 from urllib.parse import ParseResult, urlparse
 
-import tomllib
-
 SCRIPT_DIR: Path = Path(__file__).absolute().parent
 """Path to directory containing this Python script."""
 sys.path.append(str(SCRIPT_DIR))
 """Allow camping CLI to import modules from script directory."""
 
-# ruff: disable[E402]  # Disables module-import-not-at-top-of-file warnings
 # pylint: disable=wrong-import-position
 
 import keyring
+import tomllib
 from __init__ import __version__  # pylint: disable=no-name-in-module
 from aiohttp import ClientSession
 from platformdirs import user_config_dir, user_log_dir
 from pyblueiris import BlueIris
 
-# pylint: enable=wrong-import-position
 # pylint: enable=wrong-import-position
 
 
@@ -108,9 +105,12 @@ def ping_healthchecks(url: str, data: str = "", timeout=10) -> None:
     cmd = [
         "curl",
         "-fsS",
-        "--max-time", str(timeout),
-        "--retry", "5",
-        "-o", "NUL" if os.name == "nt" else "/dev/null",
+        "--max-time",
+        str(timeout),
+        "--retry",
+        "5",
+        "-o",
+        "NUL" if os.name == "nt" else "/dev/null",
     ]
     if data:
         cmd += ["--data-raw", data]
@@ -142,11 +142,15 @@ def signal_failure(url: str, msg: str) -> NoReturn:
         ping_healthchecks(url + "/fail", msg)
     except (RuntimeError, OSError) as e:
         logger.critical(f"Failed to ping {url}: {e}")
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:  # pylint: disable=broad-exception-caught  # noqa: BLE001
         logger.critical(f"Unexpected error pinging {url}: {type(e).__name__}: {e}")
-    print(f'{datetime.now().strftime(DATE_FMT)} - CRITICAL - {msg}; exiting.', file=sys.stderr)
+    print(
+        f'{datetime.now().astimezone().strftime(DATE_FMT)} - CRITICAL - {msg}; exiting.',
+        file=sys.stderr,
+    )
     logger.critical(f'{msg}; exiting.')
     exit_with_status(1)
+
 
 async def main() -> None:
     """Check Blue Iris security camera status.
@@ -177,10 +181,7 @@ async def main() -> None:
         with config_file.open("rb") as f:
             config_data = tomllib.load(f)
     except Exception as e:
-        raise ValueError(
-            f"Error reading configuration file {
-                            config_file}: {e}"
-        ) from e
+        raise ValueError(f"Error reading configuration file {config_file}: {e}") from e
 
     logger.info(f'Configuration loaded from "{config_file}".')
 
@@ -217,13 +218,13 @@ async def main() -> None:
         )
 
         logger.info(
-            f"Logging into {protocol}://{host}:{port} as {config_data["blueiris_user"]} ..."
+            f"Logging into {protocol}://{host}:{port} as {config_data['blueiris_user']} ..."
         )
 
         try:
             if not await bi.setup_session():
                 signal_failure(blueiris_ping_url, "Blue Iris DOWN.")
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught  # noqa: BLE001
             signal_failure(blueiris_ping_url, f"Blue Iris DOWN: {type(e).__name__}: {e}.")
 
         if bi.version == "noname":
@@ -254,7 +255,9 @@ async def main() -> None:
         ping_healthchecks(blueiris_ping_url)
 
         if down:
-            signal_failure(cameras_ping_url, f'Camera(s) DOWN: {", ".join(sorted(down))}.')
+            signal_failure(
+                cameras_ping_url, f'{len(down)} camera(s) DOWN: {", ".join(sorted(down))}.'
+            )
 
         # All cameras are UP
         ping_healthchecks(cameras_ping_url)
@@ -265,10 +268,10 @@ def cli() -> None:
     """Command line interface for CamPing."""
     try:
         asyncio.run(main())
-    except Exception as msg:  # pylint: disable=broad-exception-caught
+    except Exception as msg:  # pylint: disable=broad-exception-caught  # noqa: BLE001
         """Log a CRITICAL message and sys.exit(1)."""
         print(
-            f"{datetime.now().strftime(DATE_FMT)} - CRITICAL - {msg}; exiting.",
+            f"{datetime.now().astimezone().strftime(DATE_FMT)} - CRITICAL - {msg}; exiting.",
             file=sys.stderr,
         )
         logger.critical(f"{msg}; exiting.")
