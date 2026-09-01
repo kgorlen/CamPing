@@ -12,11 +12,11 @@ no-inline-html MD033
 
 **camping** - Check Blue Iris security camera status and ping healthchecks.io with results.
 
-# SYNOPSIS
+## SYNOPSIS
 
 ```camping```
 
-# DESCRIPTION
+## DESCRIPTION
 
 The **camping** CLI logs into the Blue Iris server using the URL and user name
 in the  **camping.toml** configuration file, obtains a list of cameras and their
@@ -28,11 +28,11 @@ file. If all cameras are UP, **camping** sends a success ping; if not,
 OS-dependent log directory, `C:\Users\`*`Username`*`\AppData\Local\CamPing\Logs`
 on Windows.
 
-# OPTIONS
+## OPTIONS
 
 None.
 
-# **camping** SETTINGS
+## **camping** SETTINGS
 
 Settings for **camping** are configured in the **camping.toml** file in the
 conventional OS-dependent data directory,
@@ -41,7 +41,7 @@ conventional OS-dependent data directory,
 See [TOML: A config file format for humans](https://toml.io/en/) for the
 **.toml** file format specification.
 
-## blueiris_url
+### blueiris_url
 
 The `blueiris_url` can be found in Blue Iris *Settings -> Web server*.
 
@@ -49,7 +49,7 @@ The `blueiris_url` can be found in Blue Iris *Settings -> Web server*.
 blueiris_url = "http://<i>IP address</i>:<i>port</i>"
 </pre>
 
-## blueiris_user
+### blueiris_user
 
 The list of valid users can be found in Blue Iris *Settings -> Users*.
 
@@ -68,7 +68,7 @@ For example:
 keyring set "blueiris" "LiveView"
 ```
 
-## blueiris_ping_url
+### blueiris_ping_url
 
 See [Healthchecks.io](https://healthchecks.io/about/) for details.  The
 `blueiris_ping_url` is pinged with the status of the Blue Iris application: OK
@@ -80,7 +80,7 @@ with an error message.
 blueiris_ping_url = "https://hc-ping.com/**********************/blue-iris*"
 ```
 
-## cameras_ping_url
+### cameras_ping_url
 
 The `cameras_ping_url` is pinged with the status of the cameras connected to
 Blue Iris: OK if all cameras are **UP**, or failure is signalled with a list of
@@ -91,9 +91,9 @@ cameras that are **DOWN**.
 cameras_ping_url = "https://hc-ping.com/**********************/security-cameras"
 ```
 
-# INSTALLATION
+## INSTALLATION
 
-## PREREQUISITES
+### PREREQUISITES
 
 [Install python 3.12 or later version](https://www.python.org/downloads/).
 
@@ -109,45 +109,26 @@ Install [keyring](https://pypi.org/project/keyring/):
 pipx install keyring
 ```
 
-## INSTALL **camping** FROM `.whl` package
+### INSTALL **camping**
 
-<pre>
-<code>pipx install <i>path</i>\camping-<i>version</i>-py3-none-any.whl</code>
-</pre>
+```
+pipx install git+https://github.com/kgorlen/CamPing.git
+```
 
-For example:
-
-<pre>
-<code>pipx install <i>path</i>\camping-2.0.0-py3-none-any.whl</code>
-</pre>
-
-## INSTALL **camping** FROM `.tar.gz` package
-
-Alternatively, install **camping** from a `.tar.gz` package file:
-
-<pre>
-<code>pipx install <i>path</i>\camping-<i>version</i>.tar.gz</code>
-</pre>
-
-For example:
-
-<pre>
-<code>pipx install <i>path</i>\camping-2.0.0-.tar.gz</code>
-</pre>
-
-# SEE ALSO
+## SEE ALSO
 
 * [Blue Iris](https://blueirissoftware.com/)<br>
 * [pyblueiris Documentation](https://nwesterhausen.github.io/pyblueiris/index.html)<br>
 * [Healthchecks.io](https://healthchecks.io/about/)<br>
+* [CamPing Repository](https://github.com/kgorlen/CamPing)
 * [TOML: A config file format for humans](https://toml.io/en/)<br>
 
-# AUTHOR
+## AUTHOR
 
 Keith Gorlen<br>
 <kgorlen@gmail.com>
 
-# COPYRIGHT
+## COPYRIGHT
 
 Copyright 2025 Keith Gorlen
 
