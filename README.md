@@ -97,6 +97,8 @@ cameras_ping_url = "https://hc-ping.com/**********************/security-cameras"
 
 [Install python 3.12 or later version](https://www.python.org/downloads/).
 
+[Install git](https://git-scm.com/install/)
+
 Install [pipx](https://pipx.pypa.io/stable/):
 
 ```
