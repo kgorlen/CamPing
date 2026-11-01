@@ -19,6 +19,7 @@ import logging
 import os
 import subprocess
 import sys
+import tomllib
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -33,7 +34,6 @@ sys.path.append(str(SCRIPT_DIR))
 # pylint: disable=wrong-import-position
 
 import keyring
-import tomllib
 from __init__ import __version__  # pylint: disable=no-name-in-module
 from aiohttp import ClientSession
 from platformdirs import user_config_dir, user_log_dir
@@ -75,9 +75,6 @@ rotating_handler.setFormatter(
     )
 )
 logging.getLogger().addHandler(rotating_handler)
-
-blueiris_ping_url: str = ""
-"""healthchecks.io URL"""
 
 
 def exit_with_status(status: int) -> NoReturn:
@@ -130,8 +127,8 @@ def ping_healthchecks(url: str, data: str = "", timeout=10) -> None:
         raise OSError(f"curl not found or error: {e}")  # pylint: disable=raise-missing-from
 
 
-def signal_failure(url: str, msg: str) -> NoReturn:
-    """Signal failure and exit.
+def signal_failure(url: str, msg: str) -> None:
+    """Signal failure.
 
     Args:
         url (str): healthchecks.io URL
@@ -148,8 +145,7 @@ def signal_failure(url: str, msg: str) -> NoReturn:
         f'{datetime.now().astimezone().strftime(DATE_FMT)} - CRITICAL - {msg}; exiting.',
         file=sys.stderr,
     )
-    logger.critical(f'{msg}; exiting.')
-    exit_with_status(1)
+    logger.critical(f'{msg}')
 
 
 async def main() -> None:
@@ -161,8 +157,6 @@ async def main() -> None:
         KeyError: Key not found in configuration .toml file.
         ValueError: BlueIris password not found in keyring.
     """
-    global blueiris_ping_url  # pylint: disable=global-statement
-
     logger.info(f'{"=" * 60}')
     logger.info(f"{SCRIPT_NAME} version {__version__} starting ...")
 
@@ -185,7 +179,14 @@ async def main() -> None:
 
     logger.info(f'Configuration loaded from "{config_file}".')
 
-    for key in ["blueiris_user", "blueiris_url", "blueiris_ping_url", "cameras_ping_url"]:
+    for key in [
+        "blueiris_user",
+        "blueiris_url",
+        "blueiris_ping_url",
+        "cameras_ping_url",
+        "storage_ping_url",
+        "min_free_gb",
+    ]:
         if key not in config_data:
             raise KeyError(f'"{key}" not found in {config_file}')
 
@@ -193,6 +194,16 @@ async def main() -> None:
     """healthchecks.io URL for Blue Iris."""
     cameras_ping_url = config_data["cameras_ping_url"]
     """healthchecks.io URL for cameras."""
+    storage_ping_url = config_data["storage_ping_url"]
+    """healthchecks.io URL for storage."""
+    min_free_gb: float = config_data["min_free_gb"]
+    """Minimum free disk space in GB."""
+    exit_status: int = 0
+    """Exit status code."""
+
+    logger.info("Settings:")
+    for key in ["blueiris_ping_url", "cameras_ping_url", "storage_ping_url", "min_free_gb"]:
+        logger.info(f"{key} = {config_data[key]}")
 
     blueiris_password: str = keyring.get_password("blueiris", config_data["blueiris_user"]) or ""
     if not blueiris_password:
@@ -224,13 +235,61 @@ async def main() -> None:
         try:
             if not await bi.setup_session():
                 signal_failure(blueiris_ping_url, "Blue Iris DOWN.")
+                exit_with_status(1)
+
         except Exception as e:  # pylint: disable=broad-exception-caught  # noqa: BLE001
             signal_failure(blueiris_ping_url, f"Blue Iris DOWN: {type(e).__name__}: {e}.")
+            exit_with_status(1)
 
         if bi.version == "noname":
             signal_failure(blueiris_ping_url, "Blue Iris login failed.")
+            exit_with_status(1)
 
         logger.info(f"Blue Iris Version {bi.version} {bi.name}.")
+
+        logger.info("Retrieving Blue Iris status ...")
+        async with session.post(
+            bi.client.url,
+            json={
+                "cmd": "status",
+                "session": bi.client.blueiris_session,
+            },
+        ) as response:
+            response.raise_for_status()
+            status_response = await response.json()
+
+        if status_response.get("result") != "success":
+            signal_failure(
+                blueiris_ping_url,
+                f"Unable to retrieve Blue Iris status: {status_response!r}",
+            )
+            exit_with_status(1)
+
+        status = status_response["data"]
+
+        logger.info("Checking video storage status ...")
+
+        for volume in status.get("disks", []):
+            logger.info(
+                f"Blue Iris volume {volume['disk']}: {volume['free'] / 1024:.1f} GB free of {volume['total'] / 1024:.1f} GB total, error={volume['error']}",
+            )
+
+            if volume["free"] / 1024 < min_free_gb:
+                signal_failure(
+                    storage_ping_url,
+                    f"Volume {volume['disk']} < {min_free_gb} GB free: {volume['free'] / 1024:.1f} GB free.",
+                )
+                exit_status = 1
+
+            if volume["error"]:
+                signal_failure(
+                    storage_ping_url, f"Volume {volume['disk']} has {volume['error']} error(s)."
+                )
+                exit_status = 1
+
+        if exit_status == 0:
+            logger.info("Blue Iris video storage OK.")
+            ping_healthchecks(storage_ping_url)
 
         logger.info("Updating camera list ...")
         logger.setLevel(logging.WARNING)
@@ -238,6 +297,7 @@ async def main() -> None:
         logger.setLevel(logging.INFO)
 
         down: list[str] = []
+        """List of cameras that are down."""
 
         for camera in bi.cameras:
             if camera.short_name == "@Index":
@@ -258,10 +318,12 @@ async def main() -> None:
             signal_failure(
                 cameras_ping_url, f'{len(down)} camera(s) DOWN: {", ".join(sorted(down))}.'
             )
+            exit_with_status(1)
 
         # All cameras are UP
         ping_healthchecks(cameras_ping_url)
-        exit_with_status(0)
+
+        exit_with_status(exit_status)
 
 
 def cli() -> None:

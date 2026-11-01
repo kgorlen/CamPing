@@ -19,10 +19,10 @@ no-inline-html MD033
 ## DESCRIPTION
 
 The **camping** CLI logs into the Blue Iris server using the URL and user name
-in the  **camping.toml** configuration file, obtains a list of cameras and their
-status, and pings healthchecks.io at the URL also specified in the configuration
-file. If all cameras are UP, **camping** sends a success ping; if not,
-**camping** sends a /fail ping with a list of the failed cameras.
+in the  **camping.toml** configuration file and obtains the status of video
+storage and cameras. If storage space is low or storage errors are detected,
+**camping** sends a /fail ping for each drive to healthchecks.io. If any cameras
+are DOWN, **camping** sends a /fail ping with a list of the failed cameras.
 
 **camping** also writes a log file named **camping.log** to the conventional
 OS-dependent log directory, `C:\Users\`*`Username`*`\AppData\Local\CamPing\Logs`
@@ -72,8 +72,8 @@ keyring set "blueiris" "LiveView"
 
 See [Healthchecks.io](https://healthchecks.io/about/) for details.  The
 `blueiris_ping_url` is pinged with the status of the Blue Iris application: OK
-if the status of all cameras is successfully retrieved, or failure is signalled
-with an error message.
+if the status of video storage and all cameras is successfully retrieved;
+otherwise, any failures are signalled.
 
 ```
 # Blue Iris status healthchecks.io URL
@@ -83,12 +83,34 @@ blueiris_ping_url = "https://hc-ping.com/**********************/blue-iris*"
 ### cameras_ping_url
 
 The `cameras_ping_url` is pinged with the status of the cameras connected to
-Blue Iris: OK if all cameras are **UP**, or failure is signalled with a list of
+Blue Iris: OK if all cameras are **UP**; otherwise, failure is signalled with a list of
 cameras that are **DOWN**.
 
 ```
 # Camera status healthchecks.io URL
 cameras_ping_url = "https://hc-ping.com/**********************/security-cameras"
+```
+
+### storage_ping_url
+
+The `storage_ping_url` is pinged with the status of video storage used by Blue
+Iris: OK if all drives have sufficient storage and no errors; otherwise, a failure
+is signalled for each drive with problems.
+
+```
+# Video storage healthchecks.io URL
+storage_ping_url = "https://hc-ping.com/Md1lpdGyeLIN0J2KNdBjfw/video-storage"
+```
+
+### min_free_gb
+
+The `min_free_gb` setting specifies the minimum free space in gigabytes that
+must be available on each Blue Iris storage drive. If the storage space is less than
+`min_free_gb`, a /fail ping is sent for each drive with low storage space.
+
+```
+# Storage free space in GB
+min_free_gb = 500
 ```
 
 ## INSTALLATION
