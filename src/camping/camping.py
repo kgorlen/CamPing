@@ -20,7 +20,6 @@ import os
 import subprocess
 import sys
 import tomllib
-from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, NoReturn
@@ -44,20 +43,12 @@ from pyblueiris import BlueIris
 
 # Global Constants
 
-
 SCRIPT_NAME: str = Path(__file__).stem
 """Name of this script without .py extension."""
 DATE_FMT = "%Y-%m-%d %H:%M:%S"
-"""Format for dates in messages."""
+"""Format for dates in log messages."""
 
 # Global Variables
-
-logging.basicConfig(
-    handlers=[],
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 
 logger = logging.getLogger(SCRIPT_NAME)
 """Logging facility."""
@@ -65,16 +56,34 @@ camping_log: Path = (
     Path(user_log_dir("CamPing", appauthor=False, ensure_exists=True)) / "camping.log"
 )
 """CamPing log file."""
+
+# Configure logging to console and file
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.ERROR)  # Log ERROR and CRITICAL to console
+console_formatter = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt=DATE_FMT,
+)
+console_handler.setFormatter(console_formatter)
+
 rotating_handler = RotatingFileHandler(camping_log, maxBytes=5 * 1024 * 1024, backupCount=3)
 """Rotating log file handler."""
 rotating_handler.setLevel(logging.INFO)
 rotating_handler.setFormatter(
     logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s",  # Log format
-        datefmt=DATE_FMT,  # Custom date format
+        datefmt=DATE_FMT,
     )
 )
-logging.getLogger().addHandler(rotating_handler)
+
+# Setup root logger
+logging.basicConfig(
+    handlers=[console_handler, rotating_handler],
+    level=logging.INFO,
+)
+
+ERROR_COUNT: int = 0
+"""Count of errors encountered."""
 
 
 def exit_with_status(status: int) -> NoReturn:
@@ -134,6 +143,9 @@ def signal_failure(url: str, msg: str) -> None:
         url (str): healthchecks.io URL
         msg (str): message to log
     """
+    global ERROR_COUNT
+    ERROR_COUNT += 1
+
     logger.info(f"Signaling failure to {url}, data='{msg}' ...")
     try:
         ping_healthchecks(url + "/fail", msg)
@@ -141,25 +153,37 @@ def signal_failure(url: str, msg: str) -> None:
         logger.critical(f"Failed to ping {url}: {e}")
     except Exception as e:  # pylint: disable=broad-exception-caught  # noqa: BLE001
         logger.critical(f"Unexpected error pinging {url}: {type(e).__name__}: {e}")
-    print(
-        f'{datetime.now().astimezone().strftime(DATE_FMT)} - CRITICAL - {msg}; exiting.',
-        file=sys.stderr,
-    )
-    logger.critical(f'{msg}')
 
 
-async def main() -> None:
-    """Check Blue Iris security camera status.
+def signal_critical_failure(url: str, msg: str) -> NoReturn:
+    """Signal critical failure.
 
-    Raises:
-        FileNotFoundError: Configuration file not found
-        ValueError: Error reading configuration file.
-        KeyError: Key not found in configuration .toml file.
-        ValueError: BlueIris password not found in keyring.
+    Args:
+        url (str): healthchecks.io URL
+        msg (str): message to log
     """
-    logger.info(f'{"=" * 60}')
-    logger.info(f"{SCRIPT_NAME} version {__version__} starting ...")
+    signal_failure(url, msg)
+    logger.critical(msg + "; exiting.")
+    exit_with_status(1)
 
+
+def signal_error_failure(url: str, msg: str) -> None:
+    """Signal error failure.
+
+    Args:
+        url (str): healthchecks.io URL
+        msg (str): message to log
+    """
+    signal_failure(url, msg)
+    logger.error(msg)
+
+
+def load_config() -> dict[str, Any]:
+    """Load configuration from camping.toml.
+
+    Returns:
+        dict: Configuration data
+    """
     config_file: Path = (
         Path(user_config_dir("CamPing", appauthor=False, roaming=True)) / "camping.toml"
     )
@@ -190,6 +214,23 @@ async def main() -> None:
         if key not in config_data:
             raise KeyError(f'"{key}" not found in {config_file}')
 
+    return config_data
+
+
+async def main() -> None:
+    """Check Blue Iris security camera status.
+
+    Raises:
+        FileNotFoundError: Configuration file not found
+        ValueError: Error reading configuration file.
+        KeyError: Key not found in configuration .toml file.
+        ValueError: BlueIris password not found in keyring.
+    """
+    logger.info(f'{"=" * 60}')
+    logger.info(f"{SCRIPT_NAME} version {__version__} starting ...")
+
+    config_data: dict[str, Any] = load_config()
+
     blueiris_ping_url = config_data["blueiris_ping_url"]
     """healthchecks.io URL for Blue Iris."""
     cameras_ping_url = config_data["cameras_ping_url"]
@@ -198,12 +239,10 @@ async def main() -> None:
     """healthchecks.io URL for storage."""
     min_free_gb: float = config_data["min_free_gb"]
     """Minimum free disk space in GB."""
-    exit_status: int = 0
-    """Exit status code."""
 
     logger.info("Settings:")
     for key in ["blueiris_ping_url", "cameras_ping_url", "storage_ping_url", "min_free_gb"]:
-        logger.info(f"{key} = {config_data[key]}")
+        logger.info(f"  {key} = {config_data[key]}")
 
     blueiris_password: str = keyring.get_password("blueiris", config_data["blueiris_user"]) or ""
     if not blueiris_password:
@@ -215,8 +254,8 @@ async def main() -> None:
     host: str | None = parsed_url.hostname
     port: int = parsed_url.port or (443 if protocol == "https" else 80)
 
-    logger.info("Checking cameras ...")
-    async with ClientSession(raise_for_status=True) as session:  # Create an aiohttp session
+    logger.info("Creating aiohttp session ...")
+    async with ClientSession(raise_for_status=True) as session:
         bi = BlueIris(
             aiosession=session,
             user=config_data["blueiris_user"],
@@ -234,16 +273,15 @@ async def main() -> None:
 
         try:
             if not await bi.setup_session():
-                signal_failure(blueiris_ping_url, "Blue Iris DOWN.")
-                exit_with_status(1)
+                signal_critical_failure(
+                    blueiris_ping_url, "Blue Iris DOWN: Failed to setup session"
+                )
 
         except Exception as e:  # pylint: disable=broad-exception-caught  # noqa: BLE001
-            signal_failure(blueiris_ping_url, f"Blue Iris DOWN: {type(e).__name__}: {e}.")
-            exit_with_status(1)
+            signal_critical_failure(blueiris_ping_url, f"Blue Iris DOWN: {type(e).__name__}: {e}")
 
         if bi.version == "noname":
-            signal_failure(blueiris_ping_url, "Blue Iris login failed.")
-            exit_with_status(1)
+            signal_critical_failure(blueiris_ping_url, "Blue Iris login failed")
 
         logger.info(f"Blue Iris Version {bi.version} {bi.name}.")
 
@@ -259,11 +297,10 @@ async def main() -> None:
             status_response = await response.json()
 
         if status_response.get("result") != "success":
-            signal_failure(
+            signal_critical_failure(
                 blueiris_ping_url,
                 f"Unable to retrieve Blue Iris status: {status_response!r}",
             )
-            exit_with_status(1)
 
         status = status_response["data"]
 
@@ -275,19 +312,17 @@ async def main() -> None:
             )
 
             if volume["free"] / 1024 < min_free_gb:
-                signal_failure(
+                signal_error_failure(
                     storage_ping_url,
                     f"Volume {volume['disk']} < {min_free_gb} GB free: {volume['free'] / 1024:.1f} GB free.",
                 )
-                exit_status = 1
 
             if volume["error"]:
-                signal_failure(
+                signal_error_failure(
                     storage_ping_url, f"Volume {volume['disk']} has {volume['error']} error(s)."
                 )
-                exit_status = 1
 
-        if exit_status == 0:
+        if ERROR_COUNT == 0:
             logger.info("Blue Iris video storage OK.")
             ping_healthchecks(storage_ping_url)
 
@@ -315,7 +350,7 @@ async def main() -> None:
         ping_healthchecks(blueiris_ping_url)
 
         if down:
-            signal_failure(
+            signal_error_failure(
                 cameras_ping_url, f'{len(down)} camera(s) DOWN: {", ".join(sorted(down))}.'
             )
             exit_with_status(1)
@@ -323,7 +358,7 @@ async def main() -> None:
         # All cameras are UP
         ping_healthchecks(cameras_ping_url)
 
-        exit_with_status(exit_status)
+        exit_with_status(ERROR_COUNT > 0)
 
 
 def cli() -> None:
@@ -331,11 +366,6 @@ def cli() -> None:
     try:
         asyncio.run(main())
     except Exception as msg:  # pylint: disable=broad-exception-caught  # noqa: BLE001
-        """Log a CRITICAL message and sys.exit(1)."""
-        print(
-            f"{datetime.now().astimezone().strftime(DATE_FMT)} - CRITICAL - {msg}; exiting.",
-            file=sys.stderr,
-        )
         logger.critical(f"{msg}; exiting.")
         exit_with_status(1)
 
